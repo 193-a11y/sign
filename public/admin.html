@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>광개토환경 연차 관리자</title>
+<meta name="robots" content="noindex,nofollow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <div class="logo">🌿</div>
+      <div style="flex:1">
+        <h1>연차 관리자</h1>
+        <div class="sub">광개토환경</div>
+      </div>
+      <span class="sub" id="who" style="margin-right:8px"></span><button class="btn ghost sm hide" id="logout">로그아웃</button>
+    </div>
+  </header>
+  <div id="banner"></div>
+  <main id="main"></main>
+  <div class="foot"><a href="/">← 신청 화면으로</a></div>
+</div>
+<script src="/common.js"></script>
+<script src="/admin.js"></script>
+</body>
+</html>
