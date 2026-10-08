@@ -1,22 +1,20 @@
 // Netlify Function — /api/*  (Node 22, Netlify Database = Postgres)
-// 환경변수(필수): ADMIN_PASSWORD(최초 총괄 계정 생성용), SESSION_SECRET, PHONE_KEY(전화번호 암호화 키 — 한 번 정하면 바꾸지 말 것)
+// 근무자는 로그인 없이 학교 선택 + 이름·연락처 입력 + 서명으로 신청, 관리자만 로그인.
+// 환경변수(필수): ADMIN_PASSWORD(최초 총괄 계정 생성용), SESSION_SECRET
 // 선택: DUTY_MULT(당직경비 차감 배수, 기본 2)
 
 const ROLES = ['당직경비', '미화', '시설관리'];
 const TYPES = {
-  '연차': { d: 1 },
-  '오전반차': { d: 1, half: 1 },
-  '오후반차': { d: 1, half: 1 },
-  '무급휴가': { d: 0 },
-  '경조사휴가': { d: 0 },
+  '연차': {},
+  '오전반차': { half: 1 },
+  '오후반차': { half: 1 },
+  '무급휴가': {},
+  '경조사휴가': {},
 };
-const DEDUCT = Object.keys(TYPES).filter(k => TYPES[k].d);
-const DEDUCT_SQL = DEDUCT.map(t => `'${t}'`).join(',');           // 상수 목록(사용자 입력 아님)
 const MAX_ADMINS = 10;
-const WORKER_TTL = 7 * 24 * 3600e3, ADMIN_TTL = 12 * 3600e3;
+const ADMIN_TTL = 12 * 3600e3;
 const PBKDF2_ITER = 210000;
 
-// 공휴일 기본값(참고용). 관리자 화면에서 수정하면 settings 테이블 값이 우선합니다.
 const DEFAULT_HOL = [
  '2026-01-01','2026-02-16','2026-02-17','2026-02-18','2026-03-01','2026-03-02','2026-05-01','2026-05-05','2026-05-24','2026-05-25','2026-06-03','2026-06-06','2026-08-15','2026-08-17','2026-09-24','2026-09-25','2026-09-26','2026-10-03','2026-10-05','2026-10-09','2026-12-25',
  '2027-01-01','2027-02-06','2027-02-07','2027-02-08','2027-02-09','2027-03-01','2027-05-01','2027-05-03','2027-05-05','2027-05-13','2027-06-06','2027-07-17','2027-07-19','2027-08-15','2027-08-16','2027-09-14','2027-09-15','2027-09-16','2027-10-03','2027-10-04','2027-10-09','2027-10-11','2027-12-25','2027-12-27'
@@ -45,14 +43,14 @@ const pad = n => String(n).padStart(2, '0');
 const ymd = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const parseD = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
 const validDate = s => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && ymd(parseD(s)) === s;
-const norm = s => String(s || '').replace(/\s+/g, '').toLowerCase();
 const todayKST = () => { const d = new Date(Date.now() + 9 * 3600e3); return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`; };
 const normPhone = s => {
   let d = String(s || '').replace(/\D/g, '');
-  if (d.startsWith('8210')) d = '0' + d.slice(2);
-  return /^01\d{8,9}$/.test(d) ? d : null;
+  if (d.startsWith('82')) d = '0' + d.slice(2);
+  return /^0\d{8,10}$/.test(d) ? d : null;
 };
 const intId = v => { const n = Number(v); return Number.isInteger(n) && n > 0 ? n : null; };
+const clean = (s, max) => String(s ?? '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, max);
 
 function calcDays(s, e, weekend, hol) {
   const a = parseD(s), b = parseD(e);
@@ -72,7 +70,7 @@ async function getHolidays() {
   return DEFAULT_HOL;
 }
 
-/* ---------- 암호·세션 ---------- */
+/* ---------- 암호·세션(관리자) ---------- */
 async function hmac(secret, data) {
   const k = await crypto.subtle.importKey('raw', enc(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
   return b64u(new Uint8Array(await crypto.subtle.sign('HMAC', k, enc(data))));
@@ -88,7 +86,6 @@ async function pbkdf2(password, saltHex) {
   return hex(new Uint8Array(await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: unhex(saltHex), iterations: PBKDF2_ITER, hash: 'SHA-256' }, key, 256)));
 }
 const newSalt = () => hex(crypto.getRandomValues(new Uint8Array(16)));
-const phoneHash = (env, digits) => hmac(env.PHONE_KEY, 'phone:' + digits);
 
 async function makeToken(env, kind, id, ver, ttl) {
   const exp = Date.now() + ttl, base = `${kind}.${id}.${exp}.${ver}`;
@@ -110,20 +107,14 @@ async function getAdmin(req, env) {
   const a = await first('SELECT id,username,name,role,active,pw_ver FROM admins WHERE id=$1', [t.id]);
   return a && a.active && String(a.pw_ver) === t.ver ? a : null;
 }
-async function getWorker(req, env) {
-  const t = await readToken(env, req, 'wid', 'w'); if (!t) return null;
-  const e = await first('SELECT * FROM employees WHERE id=$1', [t.id]);
-  return e && e.active && e.pw_hash && String(e.pw_ver) === t.ver ? e : null;
-}
 const pubAdmin = a => ({ id: a.id, username: a.username, name: a.name, role: a.role });
-const pubWorker = e => ({ id: e.id, name: e.name, site: e.site, role: e.role, tail: e.phone_tail });
 
-async function tooMany(kind, ip, max, windowMs) {
-  const r = await first('SELECT COUNT(*)::int AS c FROM attempts WHERE kind=$1 AND ip=$2 AND ts>$3', [kind, ip, Date.now() - windowMs]);
+async function tooMany(kind, key, max, windowMs) {
+  const r = await first('SELECT COUNT(*)::int AS c FROM attempts WHERE kind=$1 AND ip=$2 AND ts>$3', [kind, key, Date.now() - windowMs]);
   return (r?.c || 0) >= max;
 }
-async function recordAttempt(kind, ip) {
-  await run('INSERT INTO attempts(kind,ip,ts) VALUES($1,$2,$3)', [kind, ip, Date.now()]);
+async function recordAttempt(kind, key) {
+  await run('INSERT INTO attempts(kind,ip,ts) VALUES($1,$2,$3)', [kind, key, Date.now()]);
   if (Math.random() < 0.05) await run('DELETE FROM attempts WHERE ts<$1', [Date.now() - 86400e3]);
 }
 
@@ -132,14 +123,6 @@ function pwErrorAdmin(pw, username) {
   if (pw.length > 100) return '비밀번호가 너무 깁니다.';
   if (username && pw.toLowerCase().includes(String(username).toLowerCase())) return '비밀번호에 아이디를 포함할 수 없습니다.';
   if (!/[A-Za-z]/.test(pw) || !/\d/.test(pw)) return '비밀번호에 영문과 숫자를 모두 포함하세요.';
-  return null;
-}
-function pwErrorWorker(pw, digits) {
-  if (pw.length < 6) return '비밀번호는 6자 이상이어야 합니다.';
-  if (pw.length > 50) return '비밀번호가 너무 깁니다.';
-  if (/^(.)\1+$/.test(pw)) return '같은 문자만 반복한 비밀번호는 사용할 수 없습니다.';
-  const d = String(digits || '');
-  if (d && (pw.includes(d) || pw.includes(d.slice(-4)) || pw.includes(d.slice(-8)))) return '전화번호가 들어간 비밀번호는 사용할 수 없습니다.';
   return null;
 }
 
@@ -155,159 +138,56 @@ async function body(req) {
   return JSON.parse(t || '{}');
 }
 
-/* ---------- 근무자 ---------- */
-async function findByIdentity(env, name, phone) {
-  const digits = normPhone(phone), nk = norm(name);
-  if (!digits || !nk) return { digits, nk, ph: null, emp: null };
-  const ph = await phoneHash(env, digits);
-  const emp = await first('SELECT * FROM employees WHERE phone_hash=$1 AND name_key=$2', [ph, nk]);
-  return { digits, nk, ph, emp };
+/* ---------- 근무자(로그인 없음) ---------- */
+async function activeSchools() {
+  return (await all('SELECT name FROM schools WHERE active=1 ORDER BY name')).map(r => r.name);
 }
-async function workerLogin(req, env, ip, setup) {
-  if (!env.PHONE_KEY || !env.SESSION_SECRET) return fail('서버 설정(PHONE_KEY, SESSION_SECRET)이 비어 있습니다.', 500);
+
+async function apply(req, env, ip) {
   const b = await body(req);
-  const { digits, nk, ph, emp } = await findByIdentity(env, b.name, b.phone);
-  if (!digits || !nk) return fail('이름과 전화번호를 정확히 입력하세요.');
-  const ukey = ph.slice(0, 16);
-  if ((await tooMany('wlogin', ip, 60, 15 * 60e3)) || (await tooMany('wloginu', ukey, 6, 15 * 60e3)))
-    return fail('시도가 너무 많습니다. 15분 뒤 다시 시도하세요.', 429);
-  const bad = async () => { await recordAttempt('wlogin', ip); await recordAttempt('wloginu', ukey); return fail('이름 또는 전화번호가 명단과 일치하지 않거나, 비밀번호가 올바르지 않습니다.', 401); };
-  if (!emp || !emp.active) { await pbkdf2('x', '00'.repeat(16)); return bad(); }
-
-  if (setup) {                                                         // 첫 가입: 비밀번호 설정
-    if (emp.pw_hash) return fail('이미 가입된 계정입니다. 비밀번호로 로그인하세요. (비밀번호를 잊었다면 관리자에게 초기화를 요청하세요)', 409);
-    const pw = String(b.password || ''); const pe = pwErrorWorker(pw, digits); if (pe) return fail(pe);
-    const site = emp.site || String(b.site || '').trim().slice(0, 40), role = emp.role || b.role;
-    if (!site) return fail('근무지를 입력하세요.');
-    if (!ROLES.includes(role)) return fail('직무를 선택하세요.');
-    const salt = newSalt();
-    const done = await all('UPDATE employees SET pw_salt=$1, pw_hash=$2, site=$3, role=$4, last_login=$5 WHERE id=$6 AND pw_hash IS NULL RETURNING id',
-      [salt, await pbkdf2(pw, salt), site, role, Date.now(), emp.id]);
-    if (!done.length) return fail('이미 가입된 계정입니다.', 409);
-    const e2 = { ...emp, site, role };
-    return json({ ok: true, me: pubWorker(e2) }, 200, { 'Set-Cookie': cookie('wid', await makeToken(env, 'w', emp.id, emp.pw_ver, WORKER_TTL), WORKER_TTL / 1000) });
-  }
-  if (!emp.pw_hash) return json({ needSetup: true, name: emp.name, site: emp.site, role: emp.role });
-  if (!b.password || !(await safeEqual(await pbkdf2(String(b.password), emp.pw_salt), emp.pw_hash))) return bad();
-  await run('UPDATE employees SET last_login=$1 WHERE id=$2', [Date.now(), emp.id]);
-  return json({ ok: true, me: pubWorker(emp) }, 200, { 'Set-Cookie': cookie('wid', await makeToken(env, 'w', emp.id, emp.pw_ver, WORKER_TTL), WORKER_TTL / 1000) });
-}
-
-async function balanceOf(e) {
-  const r = await first(
-    `SELECT COALESCE(SUM(CASE WHEN status='approved' THEN days END),0) AS ap,
-            COALESCE(SUM(CASE WHEN status='pending' THEN days END),0) AS pe
-     FROM requests WHERE employee_id=$1 AND type IN (${DEDUCT_SQL})`, [e.id]);
-  const used = e.used_before || 0;
-  return { total: e.total, used_before: used, ap: r.ap, pe: r.pe, rem: e.total == null ? null : e.total - used - r.ap - r.pe };
-}
-
-async function apply(req, env, w) {
-  const b = await body(req);
-  if (await tooMany('apply', String(w.id), 20, 3600e3)) return fail('짧은 시간에 너무 많이 신청했습니다. 잠시 후 다시 시도하세요.', 429);
-  const role = w.role, type = b.type, T = TYPES[type];
-  if (!w.site || !ROLES.includes(role)) return fail('근무지·직무 정보가 없습니다. 관리자에게 문의하세요.', 409);
-  if (!T) return fail('휴가 종류를 확인하세요.');
-  if (role === '당직경비' && T.half) return fail('당직경비는 반차를 신청할 수 없습니다. 연차로 신청하세요.');
-  if (!validDate(b.start) || !validDate(b.end)) return fail('기간을 선택하세요.');
+  if (b.website) return json({ ok: true, id: 'XXXXXXXX', days: 0 });          // 봇 함정 칸(사람은 비워둠)
+  const school = clean(b.school, 80), name = clean(b.name, 30), phone = normPhone(b.phone);
+  const job = b.job, type = b.type, T = TYPES[type];
+  if (!school || !(await first('SELECT 1 AS x FROM schools WHERE name=$1 AND active=1', [school]))) return fail('목록에서 근무지를 선택해 주세요.');
+  if (name.length < 2) return fail('성함을 입력해 주세요.');
+  if (!phone) return fail('연락처를 확인해 주세요. 예: 010-1234-5678');
+  if (!ROLES.includes(job)) return fail('직종을 선택해 주세요.');
+  if (!T) return fail('휴가 종류를 확인해 주세요.');
+  if (job === '당직경비' && T.half) return fail('당직경비는 반차를 신청할 수 없습니다. 연차로 신청해 주세요.');
+  if (!validDate(b.start) || !validDate(b.end)) return fail('기간을 선택해 주세요.');
   const start = b.start, end = T.half ? b.start : b.end;
   if (end < start) return fail('종료일이 시작일보다 빠릅니다.');
   if ((parseD(end) - parseD(start)) / 86400000 > 366) return fail('기간이 너무 깁니다.');
 
+  if ((await tooMany('apply', ip, 60, 3600e3)) || (await tooMany('applyp', phone, 10, 3600e3)))
+    return fail('짧은 시간에 너무 많이 신청했습니다. 잠시 후 다시 시도해 주세요.', 429);
+
   const hol = new Set(await getHolidays());
-  const duty = role === '당직경비';                         // 당직경비: 토·일·공휴일 포함, 출근일 1회당 2일
+  const duty = job === '당직경비';                         // 당직경비: 토·일·공휴일 포함, 출근일 1회당 2일
   const days = T.half ? 0.5 : calcDays(start, end, duty, hol) * (duty ? dutyMult(env) : 1);
   if (!(days > 0)) return fail('선택한 기간이 모두 휴일입니다.');
 
-  const reason = type === '경조사휴가' ? String(b.reason || '').trim().slice(0, 100) : '개인사정';
+  const reason = type === '경조사휴가' ? clean(b.reason, 100) : '개인사정';
   if (!reason) return fail('경조사휴가는 사유를 직접 작성해야 합니다.');
+  const notes = clean(b.notes, 120);
   const sig = String(b.sig || '');
-  if (!sig.startsWith('data:image/png;base64,') || sig.length < 400 || sig.length > 250000) return fail('서명을 확인하세요.');
+  if (!sig.startsWith('data:image/png;base64,') || sig.length < 400 || sig.length > 250000) return fail('서명을 확인해 주세요.');
 
   const dup = await first(
-    "SELECT type,start_date,end_date FROM requests WHERE employee_id=$1 AND status IN ('pending','approved') AND start_date<=$2 AND end_date>=$3 LIMIT 1",
-    [w.id, end, start]);
+    "SELECT type,start_date,end_date FROM requests WHERE name=$1 AND phone=$2 AND status IN ('pending','approved') AND start_date<=$3 AND end_date>=$4 LIMIT 1",
+    [name, phone, end, start]);
   if (dup) return fail(`이미 신청한 기간과 겹칩니다. (${dup.type} ${dup.start_date}~${dup.end_date})`, 409);
 
-  if (T.d && w.total != null) {
-    const bal = await balanceOf(w);
-    if (days > bal.rem) return fail(`잔여 연차(${bal.rem}일)보다 많이 신청할 수 없습니다. 무급휴가 등은 관리자에게 문의하세요.`, 409);
-  }
-  await recordAttempt('apply', String(w.id));
+  await recordAttempt('apply', ip); await recordAttempt('applyp', phone);
   const id = newCode();
   await run(
-    'INSERT INTO requests(id,employee_id,type,start_date,end_date,days,wk,reason,late,sig,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
-    [id, w.id, type, start, end, days, duty ? 1 : 0, reason, start < todayKST() ? 1 : 0, sig, Date.now()]);
+    `INSERT INTO requests(id,school,name,phone,job,type,start_date,end_date,days,wk,reason,notes,late,sig,created_at)
+     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+    [id, school, name, phone, job, type, start, end, days, duty ? 1 : 0, reason, notes, start < todayKST() ? 1 : 0, sig, Date.now()]);
   return json({ ok: true, id, days });
 }
 
-async function workerRoutes(req, env, path, w) {
-  if (path === '/worker/me') return json({ me: pubWorker(w), balance: await balanceOf(w) });
-  if (path === '/worker/requests') {
-    const rows = await all(
-      'SELECT id,type,start_date,end_date,days,reason,status,note,cancel_req,cancel_denied,late,created_at FROM requests WHERE employee_id=$1 ORDER BY start_date DESC LIMIT 200', [w.id]);
-    return json({ items: rows });
-  }
-  if (req.method !== 'POST') return fail('not found', 404);
-  const b = await body(req);
-  if (path === '/worker/password') {
-    if (!(await safeEqual(await pbkdf2(String(b.current || ''), w.pw_salt), w.pw_hash))) return fail('현재 비밀번호가 올바르지 않습니다.', 403);
-    const pe = pwErrorWorker(String(b.next || ''), ''); if (pe) return fail(pe);
-    const salt = newSalt(), ver = w.pw_ver + 1;
-    await run('UPDATE employees SET pw_salt=$1, pw_hash=$2, pw_ver=$3 WHERE id=$4', [salt, await pbkdf2(String(b.next), salt), ver, w.id]);
-    return json({ ok: true }, 200, { 'Set-Cookie': cookie('wid', await makeToken(env, 'w', w.id, ver, WORKER_TTL), WORKER_TTL / 1000) });
-  }
-  const id = String(b.id || '').trim().toUpperCase();
-  const r = await first('SELECT status FROM requests WHERE id=$1 AND employee_id=$2', [id, w.id]);   // 본인 건만
-  if (!r) return fail('신청을 찾을 수 없습니다.', 404);
-  if (path === '/withdraw') {
-    if (r.status !== 'pending') return fail('승인 전(대기) 신청만 철회할 수 있습니다.', 409);
-    await run('DELETE FROM requests WHERE id=$1 AND employee_id=$2', [id, w.id]);
-  } else if (path === '/cancel-request') {
-    if (r.status !== 'approved') return fail('승인된 신청만 취소를 요청할 수 있습니다.', 409);
-    await run('UPDATE requests SET cancel_req=1, cancel_denied=0 WHERE id=$1 AND employee_id=$2', [id, w.id]);
-  } else return fail('not found', 404);
-  return json({ ok: true });
-}
-
 /* ---------- 관리자 ---------- */
-async function rosterUpsert(env, rows, offset) {
-  if (!env.PHONE_KEY) return fail('서버에 PHONE_KEY가 설정되지 않았습니다.', 500);
-  if (!Array.isArray(rows) || rows.length > 300) return fail('한 번에 300행까지 올릴 수 있습니다.');
-  const existing = new Set((await all('SELECT name_key, phone_hash FROM employees')).map(r => r.name_key + '|' + r.phone_hash));
-  const good = [], skipped = []; let added = 0, updated = 0;
-  const seen = new Set();
-  const num = v => (v === '' || v == null || isNaN(Number(v)) || Number(v) < 0 || Number(v) > 366 || (Number(v) * 2) % 1) ? null : Number(v);
-  for (let i = 0; i < rows.length; i++) {
-    const r = rows[i] || [], line = offset + i + 1;
-    const name = String(r[0] ?? '').trim().slice(0, 30), digits = normPhone(r[1]);
-    if (!name && !r[1]) continue;
-    if (!name) { skipped.push({ row: line, reason: '이름 없음' }); continue; }
-    if (!digits) { skipped.push({ row: line, name, reason: '전화번호 형식 오류' }); continue; }
-    const site = String(r[2] ?? '').trim().slice(0, 40) || null;
-    const role = ROLES.includes(String(r[3] ?? '').trim()) ? String(r[3]).trim() : null;
-    const ph = await phoneHash(env, digits), key = norm(name) + '|' + ph;
-    if (seen.has(key)) { skipped.push({ row: line, name, reason: '명단에 같은 이름·번호가 중복됨' }); continue; }
-    seen.add(key);
-    existing.has(key) ? updated++ : added++;
-    good.push([name, norm(name), ph, digits.slice(-4), site, role, num(r[4]), num(r[5]), Date.now()]);
-  }
-  for (let i = 0; i < good.length; i += 100) {                          // 100명씩 한 번에 저장(한 문장 = 원자적)
-    const chunk = good.slice(i, i + 100), params = [], tuples = [];
-    chunk.forEach((g, k) => {
-      const b = k * 9;
-      tuples.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5}::text,$${b + 6}::text,$${b + 7}::float8,$${b + 8}::float8,$${b + 9}::float8)`);
-      params.push(...g);
-    });
-    await run(
-      `INSERT INTO employees(name,name_key,phone_hash,phone_tail,site,role,total,used_before,created_at) VALUES ${tuples.join(',')}
-       ON CONFLICT (name_key,phone_hash) DO UPDATE SET name=EXCLUDED.name, active=1,
-         site=COALESCE(EXCLUDED.site, employees.site), role=COALESCE(EXCLUDED.role, employees.role),
-         total=COALESCE(EXCLUDED.total, employees.total), used_before=COALESCE(EXCLUDED.used_before, employees.used_before)`, params);
-  }
-  return json({ ok: true, added, updated, skipped });
-}
-
 async function adminRoutes(req, env, url, path, ip) {
   if (path === '/admin/login' && req.method === 'POST') {
     if (!env.SESSION_SECRET) return fail('서버에 SESSION_SECRET이 설정되지 않았습니다.', 500);
@@ -336,9 +216,8 @@ async function adminRoutes(req, env, url, path, ip) {
 
   if (path === '/admin/requests') {
     const rows = await all(
-      `SELECT r.id,r.type,r.start_date,r.end_date,r.days,r.wk,r.reason,r.late,r.status,r.note,r.cancel_req,r.cancel_denied,r.created_at,r.decided_at,r.decided_by,
-              e.id AS emp_id,e.name,e.site,e.role,e.phone_tail
-       FROM requests r JOIN employees e ON e.id=r.employee_id ORDER BY r.created_at DESC LIMIT 3000`);
+      `SELECT id,school,name,phone,job,type,start_date,end_date,days,wk,reason,notes,late,status,note,created_at,decided_at,decided_by
+       FROM requests ORDER BY created_at DESC LIMIT 5000`);
     return json({ items: rows });
   }
   if (path === '/admin/sig') {
@@ -350,13 +229,9 @@ async function adminRoutes(req, env, url, path, ip) {
     const rows = await all('SELECT id,username,name,role,active,created_at,last_login FROM admins ORDER BY id');
     return json({ items: rows, max: MAX_ADMINS });
   }
-  if (path === '/admin/employees') {
+  if (path === '/admin/schools') {
     const rows = await all(
-      `SELECT e.id,e.name,e.site,e.role,e.phone_tail,e.total,COALESCE(e.used_before,0) AS used_before,e.active,e.last_login,
-        CASE WHEN e.pw_hash IS NULL THEN 0 ELSE 1 END AS joined,
-        COALESCE(SUM(CASE WHEN r.status='approved' AND r.type IN (${DEDUCT_SQL}) THEN r.days END),0) AS ap,
-        COALESCE(SUM(CASE WHEN r.status='pending'  AND r.type IN (${DEDUCT_SQL}) THEN r.days END),0) AS pe
-       FROM employees e LEFT JOIN requests r ON r.employee_id=e.id GROUP BY e.id ORDER BY e.name, e.phone_tail`);
+      `SELECT s.id,s.name,s.active,COUNT(r.id)::int AS n FROM schools s LEFT JOIN requests r ON r.school=s.name GROUP BY s.id ORDER BY s.name`);
     return json({ items: rows });
   }
   if (req.method !== 'POST') return fail('not found', 404);
@@ -410,33 +285,29 @@ async function adminRoutes(req, env, url, path, ip) {
     return json({ ok: true });
   }
 
-  if (path === '/admin/roster') return await rosterUpsert(env, b.rows, Number(b.offset) || 0);
-  if (path === '/admin/employee') {                         // 부여 연차·근무지·직무 수정
-    const id = intId(b.id); if (!id) return fail('근무자를 확인하세요.');
-    const total = b.total === null || b.total === '' ? null : Number(b.total);
-    const used = Number(b.used_before || 0);
-    if ((total !== null && !(total >= 0 && total <= 366 && (total * 2) % 1 === 0)) || !(used >= 0 && used <= 366 && (used * 2) % 1 === 0)) return fail('0.5 단위의 올바른 숫자를 입력하세요.');
-    const role = ROLES.includes(b.role) ? b.role : null, site = String(b.site || '').trim().slice(0, 40) || null;
-    await run('UPDATE employees SET total=$1::float8, used_before=$2::float8, site=COALESCE($3::text,site), role=COALESCE($4::text,role) WHERE id=$5', [total, used, site, role, id]);
-    return json({ ok: true });
+  if (path === '/admin/schools-add') {                       // 학교 목록 추가(이미 있으면 다시 사용으로)
+    const names = [...new Set((Array.isArray(b.names) ? b.names : []).map(x => clean(x, 80)).filter(Boolean))];
+    if (!names.length) return fail('추가할 학교 이름이 없습니다.');
+    if (names.length > 2000) return fail('한 번에 2000개까지 추가할 수 있습니다.');
+    const before = (await first('SELECT COUNT(*)::int AS c FROM schools')).c;
+    for (let i = 0; i < names.length; i += 200) {
+      const chunk = names.slice(i, i + 200), params = [Date.now()];
+      const tuples = chunk.map((n, k) => { params.push(n); return `($${k + 2},1,$1)`; });
+      await run(`INSERT INTO schools(name,active,created_at) VALUES ${tuples.join(',')} ON CONFLICT (name) DO UPDATE SET active=1`, params);
+    }
+    const after = (await first('SELECT COUNT(*)::int AS c FROM schools')).c;
+    return json({ ok: true, added: after - before, total: names.length });
   }
-  if (path === '/admin/employee-reset') {                   // 비밀번호 초기화: 다시 "첫 로그인" 상태로, 기존 로그인 무효화
-    const id = intId(b.id); if (!id) return fail('근무자를 확인하세요.');
-    await run('UPDATE employees SET pw_salt=NULL, pw_hash=NULL, pw_ver=pw_ver+1 WHERE id=$1', [id]);
-    return json({ ok: true });
-  }
-  if (path === '/admin/employee-active') {                  // 퇴사자 비활성/재사용
-    const id = intId(b.id); if (!id) return fail('근무자를 확인하세요.');
-    await run('UPDATE employees SET active=$1, pw_ver=pw_ver+1 WHERE id=$2', [b.active ? 1 : 0, id]);
-    return json({ ok: true });
-  }
-  if (path === '/admin/employee-phone') {                   // 전화번호 변경(번호가 바뀐 근무자)
-    const id = intId(b.id); if (!id) return fail('근무자를 확인하세요.');
-    const digits = normPhone(b.phone); if (!digits) return fail('전화번호 형식을 확인하세요.');
-    const ph = await phoneHash(env, digits), e = await first('SELECT name_key FROM employees WHERE id=$1', [id]);
-    if (!e) return fail('근무자를 찾을 수 없습니다.', 404);
-    if (await first('SELECT 1 AS x FROM employees WHERE name_key=$1 AND phone_hash=$2 AND id<>$3', [e.name_key, ph, id])) return fail('같은 이름·번호의 근무자가 이미 있습니다.', 409);
-    await run('UPDATE employees SET phone_hash=$1, phone_tail=$2, pw_salt=NULL, pw_hash=NULL, pw_ver=pw_ver+1 WHERE id=$3', [ph, digits.slice(-4), id]);
+  if (path === '/admin/school-update') {                     // 이름 변경 / 숨김(사용 안 함) / 다시 사용
+    const s = await first('SELECT * FROM schools WHERE id=$1', [intId(b.id)]);
+    if (!s) return fail('근무지를 찾을 수 없습니다.', 404);
+    if (typeof b.name === 'string' && clean(b.name, 80) && clean(b.name, 80) !== s.name) {
+      const nn = clean(b.name, 80);
+      if (await first('SELECT 1 AS x FROM schools WHERE name=$1', [nn])) return fail('이미 있는 근무지 이름입니다.', 409);
+      await run('UPDATE schools SET name=$1 WHERE id=$2', [nn, s.id]);
+      await run('UPDATE requests SET school=$1 WHERE school=$2', [nn, s.name]);        // 기존 신청서 표기도 함께 변경
+    }
+    if (typeof b.active === 'boolean') await run('UPDATE schools SET active=$1 WHERE id=$2', [b.active ? 1 : 0, s.id]);
     return json({ ok: true });
   }
   if (path === '/admin/holidays') {
@@ -447,20 +318,19 @@ async function adminRoutes(req, env, url, path, ip) {
   }
   if (path === '/admin/decide') {
     const id = String(b.id || '').toUpperCase(), note = String(b.note || '').slice(0, 200);
-    const r = await first('SELECT status,cancel_req FROM requests WHERE id=$1', [id]);
+    const r = await first('SELECT status FROM requests WHERE id=$1', [id]);
     if (!r) return fail('신청을 찾을 수 없습니다.', 404);
     const now = Date.now(), act = b.action;
     if (act === 'approve' && ['pending', 'rejected'].includes(r.status))
-      await run("UPDATE requests SET status='approved', note='', decided_at=$1, decided_by=$2, cancel_req=0, cancel_denied=0 WHERE id=$3", [now, me.name, id]);
+      await run("UPDATE requests SET status='approved', note='', decided_at=$1, decided_by=$2 WHERE id=$3", [now, me.name, id]);
     else if (act === 'reject' && ['pending', 'approved'].includes(r.status)) {
       if (!note) return fail('반려 사유를 입력하세요.');
       await run("UPDATE requests SET status='rejected', note=$1, decided_at=$2, decided_by=$3 WHERE id=$4", [note, now, me.name, id]);
     } else if (act === 'cancel' && r.status === 'approved')
       await run("UPDATE requests SET status='cancelled', note=$1, decided_at=$2, decided_by=$3 WHERE id=$4", [note || '취소 처리', now, me.name, id]);
-    else if (act === 'deny_cancel' && r.status === 'approved' && r.cancel_req) {
-      if (!note) return fail('반려 사유를 입력하세요.');
-      await run('UPDATE requests SET cancel_denied=1, note=$1, decided_at=$2, decided_by=$3 WHERE id=$4', [note, now, me.name, id]);
-    } else return fail('현재 상태에서는 처리할 수 없습니다. 화면을 새로고침하세요.', 409);
+    else if (act === 'delete')                                   // 잘못 들어온 신청 삭제(근무자는 직접 철회 불가)
+      await run('DELETE FROM requests WHERE id=$1', [id]);
+    else return fail('현재 상태에서는 처리할 수 없습니다. 화면을 새로고침하세요.', 409);
     return json({ ok: true });
   }
   return fail('not found', 404);
@@ -475,19 +345,12 @@ export async function handle(request, ip, env = process.env) {
       if (o && new URL(o).host !== url.host) return fail('forbidden', 403);
     }
     if (path === '/config' && request.method === 'GET')
-      return json({ holidays: await getHolidays(), dutyMult: dutyMult(env) });
+      return json({ holidays: await getHolidays(), dutyMult: dutyMult(env), schools: await activeSchools() });
     if (path === '/session' && request.method === 'GET') {
       const a = await getAdmin(request, env); return json({ admin: a ? pubAdmin(a) : null });
     }
-    if (path === '/worker/login' && request.method === 'POST') return await workerLogin(request, env, ip, false);
-    if (path === '/worker/setup' && request.method === 'POST') return await workerLogin(request, env, ip, true);
-    if (path === '/worker/logout' && request.method === 'POST') return json({ ok: true }, 200, { 'Set-Cookie': cookie('wid', '', 0) });
+    if (path === '/apply' && request.method === 'POST') return await apply(request, env, ip);
     if (path.startsWith('/admin/')) return await adminRoutes(request, env, url, path, ip);
-
-    const w = await getWorker(request, env);                 // 이하 근무자 로그인 필요
-    if (!w) return fail('로그인이 필요합니다.', 401);
-    if (path === '/apply' && request.method === 'POST') return await apply(request, env, w);
-    if (path.startsWith('/worker/') || path === '/withdraw' || path === '/cancel-request') return await workerRoutes(request, env, path, w);
     return fail('not found', 404);
   } catch (e) {
     console.error('API error', path, e && (e.stack || e.message || e));

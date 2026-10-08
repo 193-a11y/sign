@@ -135,3 +135,45 @@ textarea{min-height:68px;resize:vertical}
 .foot{margin:26px 0 0;text-align:center;font-size:12.5px;color:var(--mute)}
 .foot a{color:var(--mute)}
 .hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+
+/* ---- 근무자 신청 화면(큰 글씨·큰 버튼) ---- */
+body.worker{font-size:18px}
+body.worker h1{font-size:24px}
+body.worker .card h2{font-size:21px;margin-bottom:16px}
+body.worker input,body.worker select,body.worker textarea{font-size:19px;min-height:54px;padding:12px 13px;border-radius:12px}
+body.worker .fld>span{font-size:16px;color:var(--ink);font-weight:700;margin-bottom:7px}
+body.worker .fld small,.hint{font-size:14.5px}
+body.worker .fld{margin-bottom:18px}
+.hint{color:var(--mute);margin:6px 0 10px}
+.hint.warn{color:var(--warn);font-weight:500}
+.hint:empty,.hint.warn:empty{display:none}
+.btn.big{font-size:19px;padding:16px;min-height:58px;border-radius:13px}
+.combo{position:relative}
+.combo input{padding-right:42px}
+.combo .chev{position:absolute;right:15px;top:14px;color:var(--mute);pointer-events:none}
+.sugg{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:20;background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 22px rgba(0,0,0,.14);max-height:280px;overflow-y:auto}
+.sugg button{display:block;width:100%;text-align:left;font:inherit;font-size:18px;background:none;border:0;border-bottom:1px solid var(--line);padding:14px 15px;color:var(--ink);cursor:pointer}
+.sugg button:last-child{border:0}
+.sugg button:hover,.sugg button:focus{background:var(--brand-soft);outline:0}
+.sugg .none{padding:15px;color:var(--mute);font-size:16px}
+.choice{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.choice .opt{font:inherit;font-size:18px;min-height:56px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);border-radius:12px;padding:10px;cursor:pointer}
+.choice .opt.on{background:var(--brand-soft);border-color:var(--brand);color:var(--brand);font-weight:700}
+.daysbox{background:var(--brand-soft);color:var(--ink);border-radius:12px;padding:14px 16px;margin:4px 0 8px;font-size:17px}
+.daysbox strong{font-size:26px;color:var(--brand)}
+body.worker .cal .d{height:46px;font-size:17px}
+body.worker .cal .w{font-size:14px}
+body.worker .cal .hd b{font-size:17px}
+body.worker .cal .st{font-size:14px}
+body.worker .sigbox canvas{height:190px}
+.sum{display:grid;grid-template-columns:96px 1fr;gap:12px 10px;margin:0 0 18px;font-size:18px}
+.sum dt{color:var(--mute)}.sum dd{margin:0;overflow-wrap:anywhere}
+.sigprev{border-top:1px solid var(--line);padding-top:12px;margin-bottom:6px}
+.sigprev span{color:var(--mute);font-size:15px}
+.sigprev img{display:block;width:100%;max-height:120px;object-fit:contain;background:#fff;border:1px solid var(--line);border-radius:10px;margin-top:6px}
+.chk.big{font-size:17px;align-items:flex-start;margin:16px 0}
+.chk.big input{width:26px;height:26px;min-height:0;flex:none}
+.center{text-align:center}
+.tick{font-size:54px;color:var(--ok);line-height:1}
+.pdfstage{left:-10000px}
+.choice.c3{grid-template-columns:repeat(3,1fr)}.choice.c3 .opt{font-size:17px;padding:10px 4px}
