@@ -173,8 +173,12 @@ async function apply(req, env, ip) {
   const sig = String(b.sig || '');
   if (!sig.startsWith('data:image/png;base64,') || sig.length < 400 || sig.length > 250000) return fail('서명을 확인해 주세요.');
 
+  // 당직경비: 입력한 기간은 "출근일"이고, 신청서에는 마지막 출근일의 다음 날(퇴근일)까지 자동으로 잡는다.
+  const endStored = duty ? (() => { const d = parseD(end); d.setDate(d.getDate() + 1); return ymd(d); })() : end;
   const dup = await first(
-    "SELECT type,start_date,end_date FROM requests WHERE name=$1 AND phone=$2 AND status IN ('pending','approved') AND start_date<=$3 AND end_date>=$4 LIMIT 1",
+    `SELECT type,start_date,end_date FROM requests
+     WHERE name=$1 AND phone=$2 AND status IN ('pending','approved') AND start_date<=$3
+       AND (CASE WHEN job='당직경비' THEN to_char(end_date::date - 1,'YYYY-MM-DD') ELSE end_date END)>=$4 LIMIT 1`,
     [name, phone, end, start]);
   if (dup) return fail(`이미 신청한 기간과 겹칩니다. (${dup.type} ${dup.start_date}~${dup.end_date})`, 409);
 
@@ -183,7 +187,7 @@ async function apply(req, env, ip) {
   await run(
     `INSERT INTO requests(id,school,name,phone,job,type,start_date,end_date,days,wk,reason,notes,late,sig,created_at)
      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
-    [id, school, name, phone, job, type, start, end, days, duty ? 1 : 0, reason, notes, start < todayKST() ? 1 : 0, sig, Date.now()]);
+    [id, school, name, phone, job, type, start, endStored, days, duty ? 1 : 0, reason, notes, start < todayKST() ? 1 : 0, sig, Date.now()]);
   return json({ ok: true, id, days });
 }
 

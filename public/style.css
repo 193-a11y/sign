@@ -177,3 +177,5 @@ body.worker .sigbox canvas{height:190px}
 .tick{font-size:54px;color:var(--ok);line-height:1}
 .pdfstage{left:-10000px}
 .choice.c3{grid-template-columns:repeat(3,1fr)}.choice.c3 .opt{font-size:17px;padding:10px 4px}
+.cal .d.nx{background:var(--brand-soft);outline:1.5px dashed var(--brand);outline-offset:-2px;border-radius:9px}
+.dutyline{margin-top:6px;font-size:15px;color:var(--ink)}

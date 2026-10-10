@@ -148,7 +148,7 @@ function pdfPage(r,sig){
       h('tr',null,th('근무지'),td(r.school||'-'),th('성명'),td(r.name||'-')),
       h('tr',null,th('직종'),td(r.job||'-'),th('연락처'),td(fmtPhone(r.phone))),
       h('tr',null,th('휴가 종류'),td(r.type,3)),
-      h('tr',null,th('휴가 기간'),td(L.fullRange(r.start_date,r.end_date),3)),
+      h('tr',null,th('휴가 기간'),td(r.job==='당직경비'&&!half?`${L.fullD(r.start_date)} 오후 출근 ~ ${L.fullD(r.end_date)} 오전 퇴근`:L.fullRange(r.start_date,r.end_date),3)),
       h('tr',null,th('사용 일수'),td(dayText,3)),
       h('tr',null,th('사유'),td(r.reason||'개인사정',3,'height:80px;vertical-align:top')),
       h('tr',null,th('담당자 전달사항'),td(r.notes||'',3,'height:70px;vertical-align:top')),
