@@ -164,7 +164,10 @@ async function apply(req, env, ip) {
 
   const hol = new Set(await getHolidays());
   const duty = job === '당직경비';                         // 당직경비: 토·일·공휴일 포함, 출근일 1회당 2일
-  const days = T.half ? 0.5 : calcDays(start, end, duty, hol) * (duty ? dutyMult(env) : 1);
+  // 당직경비는 격일 근무: 시작일부터 이틀 간격이 출근일, 마지막 출근일의 다음 날 아침이 퇴근. 출근 1회 = 2일.
+  const shifts = duty ? Math.floor(Math.round((parseD(end) - parseD(start)) / 86400000) / 2) + 1 : 0;
+  const lastShift = duty ? (() => { const d = parseD(start); d.setDate(d.getDate() + 2 * (shifts - 1)); return ymd(d); })() : end;
+  const days = T.half ? 0.5 : duty ? shifts * dutyMult(env) : calcDays(start, end, false, hol);
   if (!(days > 0)) return fail('선택한 기간이 모두 휴일입니다.');
 
   const reason = type === '경조사휴가' ? clean(b.reason, 100) : '개인사정';
@@ -174,12 +177,12 @@ async function apply(req, env, ip) {
   if (!sig.startsWith('data:image/png;base64,') || sig.length < 400 || sig.length > 250000) return fail('서명을 확인해 주세요.');
 
   // 당직경비: 입력한 기간은 "출근일"이고, 신청서에는 마지막 출근일의 다음 날(퇴근일)까지 자동으로 잡는다.
-  const endStored = duty ? (() => { const d = parseD(end); d.setDate(d.getDate() + 1); return ymd(d); })() : end;
+  const endStored = duty ? (() => { const d = parseD(lastShift); d.setDate(d.getDate() + 1); return ymd(d); })() : end;
   const dup = await first(
     `SELECT type,start_date,end_date FROM requests
      WHERE name=$1 AND phone=$2 AND status IN ('pending','approved') AND start_date<=$3
        AND (CASE WHEN job='당직경비' THEN to_char(end_date::date - 1,'YYYY-MM-DD') ELSE end_date END)>=$4 LIMIT 1`,
-    [name, phone, end, start]);
+    [name, phone, lastShift, start]);
   if (dup) return fail(`이미 신청한 기간과 겹칩니다. (${dup.type} ${dup.start_date}~${dup.end_date})`, 409);
 
   await recordAttempt('apply', ip); await recordAttempt('applyp', phone);

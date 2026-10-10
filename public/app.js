@@ -3,10 +3,13 @@
 const {h,$,TYPE,TYPES,ROLES,num,fmtD,range} = L;
 let F={}, CAL=null, SIG=null, busy=false, dutyMult=2, SCHOOLS=[], CUR=null;
 const isDuty=()=>F.job&&F.job.value==='당직경비';
-const calcFor=(s,e)=>L.calcDays(s,e,isDuty())*(isDuty()?dutyMult:1);
+const addDays=(s,n)=>{ const d=L.parse(s); d.setDate(d.getDate()+n); return L.ymd(d); };
+const diffDays=(a,b)=>Math.round((L.parse(b)-L.parse(a))/86400000);
+// 당직경비: 격일 근무. 시작일부터 이틀 간격이 출근일, 마지막 출근일 다음 날 아침이 퇴근.
+const shiftDates=(s,e)=>{ if(!s||!e||e<s) return []; const n=Math.floor(diffDays(s,e)/2)+1; return Array.from({length:n},(_,i)=>addDays(s,2*i)); };
+const calcFor=(s,e)=>isDuty()?shiftDates(s,e).length*dutyMult:L.calcDays(s,e,false);
 const store={ get(){ try{ return JSON.parse(localStorage.getItem('lv_me')||'{}'); }catch(e){ return {}; } }, set(v){ try{ localStorage.setItem('lv_me',JSON.stringify(v)); }catch(e){} } };
 const fmtPhone=s=>{ const d=String(s).replace(/\D/g,''); if(d.startsWith('02')) return d.length===9?`${d.slice(0,2)}-${d.slice(2,5)}-${d.slice(5)}`:`${d.slice(0,2)}-${d.slice(2,6)}-${d.slice(6)}`; return d.length===10?`${d.slice(0,3)}-${d.slice(3,6)}-${d.slice(6)}`:d.length===11?`${d.slice(0,3)}-${d.slice(3,7)}-${d.slice(7)}`:s; };
-const nextDay=s=>{ const d=L.parse(s); d.setDate(d.getDate()+1); return L.ymd(d); };
 const validPhone=s=>/^0\d{8,10}$/.test(String(s).replace(/\D/g,''));
 
 /* ---- 달력 ---- */
@@ -29,7 +32,7 @@ function buildCal(){
     for(let d=1; d<=last; d++){
       const dt=new Date(y,m,d), s=L.ymd(dt), w=dt.getDay(); let c='d';
       if(w===0)c+=' su'; if(w===6)c+=' sa'; if(L.hol.has(s))c+=' hol'; if(s===td)c+=' td';
-      if(a&&b&&s>a&&s<b)c+=' in'; if(s===a)c+=' s'; if(s===b)c+=' e'; if(isDuty()&&b&&s===nextDay(b))c+=' nx';
+      if(a&&b&&s>a&&s<b)c+=' in'; if(s===a)c+=' s'; if(s===b)c+=' e'; if(isDuty()&&a&&b&&shiftDates(a,b).includes(s))c+=' sh';
       g.append(h('button',{type:'button',class:c,onclick:()=>pick(s)},d));
     }
     const msg=!a?'시작일을 누르세요.':(picking?'종료일을 누르세요. (하루만이면 그대로 두세요)':'다른 기간으로 바꾸려면 날짜를 다시 누르세요.');
@@ -111,12 +114,13 @@ function buildForm(){
   F.recalc=()=>{
     const t=TYPE[F.type];
     if(t.half){ F.end.value=F.start.value; }
+    if(isDuty()&&!t.half&&F.start.value&&F.end.value){ const sh=shiftDates(F.start.value,F.end.value); if(sh.length) F.end.value=addDays(sh[sh.length-1],1); }   // 퇴근일로 자동 보정
     const n=(F.start.value&&F.end.value)?(t.half?0.5:calcFor(F.start.value,F.end.value)):null;
-    F.days.replaceChildren(n==null?(isDuty()?'출근일을 선택해 주세요':'날짜를 선택해 주세요'):h('span',null,'신청 일수 ',h('strong',null,n?num(n)+'일':'0일 (모두 휴일)')),(n&&isDuty())?h('div',{class:'dutyline'},`${L.fmtD(F.start.value)} 오후 출근 ~ ${L.fmtD(nextDay(F.end.value))} 오전 퇴근 (출근 ${n/dutyMult}회)`):null);
-    const pl=document.getElementById('perLbl'); if(pl&&pl.firstChild) pl.firstChild.textContent=isDuty()?'출근일 선택 ':'기간 선택 ';
+    F.days.replaceChildren(n==null?(isDuty()?'출근일을 선택해 주세요':'날짜를 선택해 주세요'):h('span',null,'신청 일수 ',h('strong',null,n?num(n)+'일':'0일 (모두 휴일)')),(n&&isDuty())?h('div',{class:'dutyline'},`${L.fmtD(F.start.value)} 오후 출근 ~ ${L.fmtD(F.end.value)} 오전 퇴근`,h('br'),`출근일: ${shiftDates(F.start.value,F.end.value).map(x=>L.parse(x).getDate()+'일').join(', ')} (${n/dutyMult}회)`):null);
+    const pl=document.getElementById('perLbl'); if(pl&&pl.firstChild) pl.firstChild.textContent=isDuty()?'기간 선택 (첫 출근일 ~ 마지막 퇴근일) ':'기간 선택 ';
     F.typeHint.textContent=t.half?'반차는 하루만 선택합니다. 시간은 아래 전달사항에 적어 주세요.':'';
     F.reasonBox.classList.toggle('hide',F.type!=='경조사휴가');
-    F.dayHint.textContent=isDuty()?`당직경비는 "출근하는 날"만 선택하세요. 다음 날 아침 퇴근까지 자동으로 포함되고, 출근 1회마다 ${dutyMult}일이 차감됩니다. 토·일·공휴일도 포함합니다.`:(F.job.value?'토·일·공휴일은 제외하고 계산합니다.':'');
+    F.dayHint.textContent=isDuty()?`당직경비는 첫 출근일부터 마지막 퇴근일(또는 마지막 출근일)까지 선택하세요. 격일(이틀 간격) 출근일을 자동 계산하고, 출근 1회마다 ${dutyMult}일이 차감됩니다.`:(F.job.value?'토·일·공휴일은 제외하고 계산합니다.':'');
     F.dateHint.textContent=(F.start.value&&F.start.value<today)?'지난 날짜입니다. 사후 신청으로 접수됩니다.':'';
     CAL.redraw(false);
   };
@@ -162,7 +166,7 @@ function review(){
   const {e,days,v}=collect();
   if(e.length){ F.err.textContent=e.join('\n'); F.err.scrollIntoView({block:'center',behavior:'smooth'}); return; }
   CUR={...v,days};
-  const rows=[['근무지',v.school],['성함',v.name],['연락처',fmtPhone(v.phone)],['직종',v.job],['휴가 종류',v.type],['휴가 기간',v.job==='당직경비'?`${L.fullD(v.start)} 오후 출근 ~ ${L.fullD(nextDay(v.end))} 오전 퇴근`:L.fullRange(v.start,v.end)],['신청 일수',num(days)+'일'+(v.job==='당직경비'&&!TYPE[v.type].half?` (출근 ${num(days/dutyMult)}회 × ${dutyMult}일)`:'')],['사유',v.reason],['전달사항',v.notes||'없음']];
+  const rows=[['근무지',v.school],['성함',v.name],['연락처',fmtPhone(v.phone)],['직종',v.job],['휴가 종류',v.type],['휴가 기간',v.job==='당직경비'?`${L.fullD(v.start)} 오후 출근 ~ ${L.fullD(addDays(shiftDates(v.start,v.end).slice(-1)[0],1))} 오전 퇴근`:L.fullRange(v.start,v.end)],['신청 일수',num(days)+'일'+(v.job==='당직경비'&&!TYPE[v.type].half?` (출근 ${num(days/dutyMult)}회 × ${dutyMult}일)`:'')],['사유',v.reason],['전달사항',v.notes||'없음']];
   const chk=h('input',{type:'checkbox',id:'okchk'}), err=h('p',{class:'err',role:'alert'});
   const go=h('button',{class:'btn block big',onclick:async()=>{
     err.textContent=''; if(!chk.checked){ err.textContent='내용을 확인한 뒤 확인란을 눌러 주세요.'; return; }
