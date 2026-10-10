@@ -185,7 +185,7 @@ function review(){
 function back(){ $('#main').replaceChildren(FORM); window.scrollTo(0,0); }
 function done(r){
   $('#main').replaceChildren(h('div',{class:'card center'},h('div',{class:'tick'},'✓'),h('h2',null,'신청이 접수되었습니다'),
-    h('div',{class:'receipt'},h('div',{class:'sub'},'접수번호'),h('div',{class:'code'},r.id),h('div',{class:'sub'},`${CUR.school} · ${CUR.name} · ${CUR.type} ${num(r.days)}일`)),
+    h('div',{class:'receipt'},h('div',{class:'sub'},`${CUR.school} · ${CUR.name} · ${CUR.type} ${num(r.days)}일`),h('div',{class:'sub'},L.range(CUR.start,CUR.end))),
     h('p',{class:'hint'},'관리자가 확인한 뒤 승인합니다. 승인 여부는 담당자에게 문의해 주세요.'),
     h('button',{class:'btn ghost block big',onclick:()=>{ SIG.clear(); F.start.value=''; F.end.value=''; F.notes.value=''; F.reason.value=''; CAL.resetPick(); F.recalc(); back(); }},'새 신청서 작성하기')));
   window.scrollTo(0,0);

@@ -140,7 +140,7 @@ function pdfPage(r,sig){
     h('div',{style:'border-top:'+bd+';padding:3px 0;font-size:11px;color:#444'},r.decided_at&&st!=='pending'?ymd(new Date(r.decided_at))+(r.decided_by?' '+r.decided_by:''):' '));
   const img=sig?h('img',{src:sig,style:'height:70px;vertical-align:middle;margin-left:10px'}):h('span',{style:'color:#999;margin-left:10px'},'(서명 없음)');
   const half=r.type==='오전반차'||r.type==='오후반차';
-  const dayText=r.job==='당직경비'&&!half?`${num(r.days)}일 (당직 ${num(r.days/(L.dutyMult||2))}회 × ${L.dutyMult||2}일, 토·일·공휴일 포함)`:`${num(r.days)}일`+(half?'':' (토·일·공휴일 제외)');
+  const dayText=`${num(r.days)}일`;
   return h('div',{style:`width:794px;height:1123px;background:#fff;color:#111;font-family:${FONT};padding:64px 64px 48px;box-sizing:border-box;position:relative`},
     h('div',{style:'display:flex;justify-content:flex-end;margin-bottom:6px'},stamp),
     h('div',{style:'text-align:center;font-size:32px;font-weight:700;letter-spacing:12px;margin:10px 0 36px'},'휴 가 신 청 서'),
@@ -148,7 +148,7 @@ function pdfPage(r,sig){
       h('tr',null,th('근무지'),td(r.school||'-'),th('성명'),td(r.name||'-')),
       h('tr',null,th('직종'),td(r.job||'-'),th('연락처'),td(fmtPhone(r.phone))),
       h('tr',null,th('휴가 종류'),td(r.type,3)),
-      h('tr',null,th('휴가 기간'),td(r.job==='당직경비'&&!half?`${L.fullD(r.start_date)} 오후 출근 ~ ${L.fullD(r.end_date)} 오전 퇴근`:L.fullRange(r.start_date,r.end_date),3)),
+      h('tr',null,th('휴가 기간'),td(L.fullRange(r.start_date,r.end_date),3)),
       h('tr',null,th('사용 일수'),td(dayText,3)),
       h('tr',null,th('사유'),td(r.reason||'개인사정',3,'height:80px;vertical-align:top')),
       h('tr',null,th('담당자 전달사항'),td(r.notes||'',3,'height:70px;vertical-align:top')),
