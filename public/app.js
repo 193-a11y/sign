@@ -116,7 +116,7 @@ function buildForm(){
     if(t.half){ F.end.value=F.start.value; }
     if(isDuty()&&!t.half&&F.start.value&&F.end.value){ const sh=shiftDates(F.start.value,F.end.value); if(sh.length) F.end.value=addDays(sh[sh.length-1],1); }   // 퇴근일로 자동 보정
     const n=(F.start.value&&F.end.value)?(t.half?0.5:calcFor(F.start.value,F.end.value)):null;
-    F.days.replaceChildren(n==null?(isDuty()?'출근일을 선택해 주세요':'날짜를 선택해 주세요'):h('span',null,'신청 일수 ',h('strong',null,n?num(n)+'일':'0일 (모두 휴일)')),(n&&isDuty())?h('div',{class:'dutyline'},`${L.fmtD(F.start.value)} 오후 출근 ~ ${L.fmtD(F.end.value)} 오전 퇴근`,h('br'),`출근일: ${shiftDates(F.start.value,F.end.value).map(x=>L.parse(x).getDate()+'일').join(', ')} (${n/dutyMult}회)`):null);
+    F.days.replaceChildren(...[n==null?(isDuty()?'출근일을 선택해 주세요':'날짜를 선택해 주세요'):h('span',null,'신청 일수 ',h('strong',null,n?num(n)+'일':'0일 (모두 휴일)')),(n&&isDuty())?h('div',{class:'dutyline'},`${L.fmtD(F.start.value)} 오후 출근 ~ ${L.fmtD(F.end.value)} 오전 퇴근`,h('br'),`출근일: ${shiftDates(F.start.value,F.end.value).map(x=>L.parse(x).getDate()+'일').join(', ')} (${n/dutyMult}회)`):null].filter(Boolean));
     const pl=document.getElementById('perLbl'); if(pl&&pl.firstChild) pl.firstChild.textContent=isDuty()?'기간 선택 (첫 출근일 ~ 마지막 퇴근일) ':'기간 선택 ';
     F.typeHint.textContent=t.half?'반차는 하루만 선택합니다. 시간은 아래 전달사항에 적어 주세요.':'';
     F.reasonBox.classList.toggle('hide',F.type!=='경조사휴가');
