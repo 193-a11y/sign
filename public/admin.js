@@ -32,7 +32,7 @@ async function start(){
   try{ me=(await L.api('/api/admin/me')).admin; }catch(e){ return showLogin(); }
   $('#logout').classList.remove('hide'); $('#who').textContent=`${me.name}${me.role==='super'?' (총괄)':''}`;
   try{ const c=await L.api('/api/config'); L.hol=new Set(c.holidays||[]); L.dutyMult=c.dutyMult||2; }catch(e){}
-  await load(); clearInterval(timer); timer=setInterval(()=>{ if(!document.querySelector('.ov')) load(); },60000);
+  await load(); clearInterval(timer);   // 자동 새로고침 없음: DB가 계속 깨어 있으면 무료 컴퓨트 시간이 빨리 소진됨. 탭으로 돌아오거나 버튼을 누를 때만 갱신
 }
 
 /* ---------- 처리 ---------- */
@@ -215,7 +215,7 @@ function render(){
     h('div',{class:'stat'},h('b',null,reqs.length),h('span',null,'전체 신청'))));
   if(away.length)root.append(h('div',{class:'card',style:'padding:12px 14px'},h('div',{class:'sub',style:'margin-bottom:4px'},'오늘 휴가 중'),h('div',{style:'font-size:14px'},away.map(r=>`${r.name}(${r.school}·${r.job})`).join(', '))));
   const fl=[['pending','대기'],['approved','승인'],['closed','반려·취소'],['all','전체']];
-  root.append(h('div',{class:'chips',style:'margin-top:12px'},fl.map(([k,l])=>h('button',{class:'chip'+(filter===k?' on':''),onclick:()=>{filter=k;render();}},l))));
+  root.append(h('div',{class:'chips',style:'margin-top:12px'},fl.map(([k,l])=>h('button',{class:'chip'+(filter===k?' on':''),onclick:()=>{filter=k;render();}},l)),h('button',{class:'chip',onclick:()=>{ load(); L.toast('새로고침했습니다'); }},'↻ 새로고침')));
   const search=h('input',{type:'search',placeholder:'학교·이름·연락처 검색',value:q});
   search.addEventListener('input',()=>{ q=search.value; const pos=search.selectionStart; render(); const n=$('#main input[type=search]'); if(n){ n.focus(); n.setSelectionRange(pos,pos); } });
   root.append(search);
@@ -249,6 +249,7 @@ function render(){
   $('#main').replaceChildren(root);
 }
 
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden&&me&&!document.querySelector('.ov')) load(); });
 $('#logout').addEventListener('click',async()=>{ try{await L.api('/api/admin/logout',{body:{}});}catch(e){} showLogin(); });
 (async()=>{ try{ await L.api('/api/admin/me'); start(); }catch(e){ showLogin(); } })();
 })();
