@@ -124,9 +124,9 @@ function newAdmin(){
 function csvCell(v){ v=String(v??''); return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
 function download(name,blobParts,type){ const a=h('a',{href:URL.createObjectURL(new Blob(blobParts,{type})),download:name}); document.body.append(a); a.click(); setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1000); }
 function exportCsv(){
-  const rows=[['근무지','성명','직종','연락처','종류','시작일','종료일','일수','상태','사유','전달사항','신청일','처리 메모','처리자','사후신청','접수번호']];
+  const rows=[['근무지','성명','직종','연락처','종류','시작일','종료일','일수','상태','사유','신청일','처리 메모','처리자','사후신청','접수번호']];
   for(const r of [...reqs].sort((a,b)=>a.start_date.localeCompare(b.start_date)))
-    rows.push([r.school,r.name,r.job,fmtPhone(r.phone),r.type,r.start_date,r.end_date,r.days,ST[r.status][0],r.reason,r.notes,ymd(new Date(r.created_at)),r.note,r.decided_by||'',r.late?'Y':'',r.id]);
+    rows.push([r.school,r.name,r.job,fmtPhone(r.phone),r.type,r.start_date,r.end_date,r.days,ST[r.status][0],r.reason,ymd(new Date(r.created_at)),r.note,r.decided_by||'',r.late?'Y':'',r.id]);
   download(`휴가신청_${L.todayStr()}.csv`,['﻿'+rows.map(r=>r.map(csvCell).join(',')).join('\r\n')],'text/csv;charset=utf-8');
 }
 function pdfPage(r,sig){
@@ -151,7 +151,6 @@ function pdfPage(r,sig){
       h('tr',null,th('휴가 기간'),td(L.fullRange(r.start_date,r.end_date),3)),
       h('tr',null,th('사용 일수'),td(dayText,3)),
       h('tr',null,th('사유'),td(r.reason||'개인사정',3,'height:80px;vertical-align:top')),
-      h('tr',null,th('담당자 전달사항'),td(r.notes||'',3,'height:70px;vertical-align:top')),
       h('tr',null,th('처리 결과'),td(ST[st][0]+(r.note&&st!=='pending'?` — ${r.note}`:''),3))),
     h('div',{style:'text-align:center;font-size:17px;margin:46px 0 26px'},'위와 같이 휴가를 신청합니다.'),
     h('div',{style:'text-align:center;font-size:16px;margin-bottom:30px'},`${created.getFullYear()}년 ${created.getMonth()+1}월 ${created.getDate()}일`),
@@ -199,7 +198,6 @@ function card(r){
       h('div',{style:'text-align:right'},h('span',{class:'badge '+ST[st][1]},ST[st][0]),
         r.late?h('div',null,h('span',{class:'badge warn',style:'margin-top:4px'},'사후 신청')):null)),
     r.reason&&r.reason!=='개인사정'?h('div',{class:'n'},h('em',null,'사유 '),r.reason):null,
-    r.notes?h('div',{class:'n'},h('em',null,'전달사항 '),r.notes):null,
     r.note&&st!=='pending'?h('div',{class:'n'},h('em',null,'처리 메모 '),r.note):null,
     r.decided_by&&st!=='pending'?h('div',{class:'n'},h('em',null,'처리자 '),r.decided_by):null,
     (st==='pending'||st==='approved')&&conf.length?h('div',{class:'conf'},`같은 근무지에서 기간이 겹치는 신청 ${conf.length}건`+(same.length?` (같은 직종 ${same.length}건)`:'')+': '+conf.map(o=>`${o.name}(${o.job}·${ST[o.status][0]})`).join(', ')):null,

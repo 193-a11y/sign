@@ -104,8 +104,7 @@ function buildForm(){
   const fillTypes=()=>{ if(isDuty()&&TYPE[F.type].half){ F.type='연차'; typeC.set('연차'); } };
   F.start=h('input',{type:'text',readonly:true,placeholder:'달력에서 선택'}); F.end=h('input',{type:'text',readonly:true,placeholder:'달력에서 선택'});
   F.days=h('div',{class:'daysbox'},'날짜를 선택해 주세요');
-  F.reason=h('input',{type:'text',maxlength:100,placeholder:'예: 본인 결혼, 부친상'});
-  F.notes=h('input',{type:'text',maxlength:120,placeholder:'예: 오전 9시~오후 1시 (선택)'});
+  F.reason=h('input',{type:'text',maxlength:100,placeholder:'예: 빙모상, 부친상'});
   F.reasonBox=h('div',{class:'fld hide'},h('span',null,'경조사 사유 ',h('b',null,'*')),F.reason);
   F.typeHint=h('p',{class:'hint'}); F.dayHint=h('p',{class:'hint'}); F.dateHint=h('p',{class:'hint warn'});
   F.err=h('p',{class:'err',role:'alert'});
@@ -118,7 +117,7 @@ function buildForm(){
     const n=(F.start.value&&F.end.value)?(t.half?0.5:calcFor(F.start.value,F.end.value)):null;
     F.days.replaceChildren(...[n==null?(isDuty()?'출근일을 선택해 주세요':'날짜를 선택해 주세요'):h('span',null,'신청 일수 ',h('strong',null,n?num(n)+'일':'0일 (모두 휴일)')),(n&&isDuty())?h('div',{class:'dutyline'},`${L.fmtD(F.start.value)} 오후 출근 ~ ${L.fmtD(F.end.value)} 오전 퇴근`,h('br'),`출근일: ${shiftDates(F.start.value,F.end.value).map(x=>L.parse(x).getDate()+'일').join(', ')} (${n/dutyMult}회)`):null].filter(Boolean));
     const pl=document.getElementById('perLbl'); if(pl&&pl.firstChild) pl.firstChild.textContent=isDuty()?'기간 선택 (첫 출근일 ~ 마지막 퇴근일) ':'기간 선택 ';
-    F.typeHint.textContent=t.half?'반차는 하루만 선택합니다. 시간은 아래 전달사항에 적어 주세요.':'';
+    F.typeHint.textContent=t.half?'반차는 하루만 선택합니다.':'';
     F.reasonBox.classList.toggle('hide',F.type!=='경조사휴가');
     F.dayHint.textContent=isDuty()?`당직경비는 첫 출근일부터 마지막 퇴근일(또는 마지막 출근일)까지 선택하세요. 격일(이틀 간격) 출근일을 자동 계산하고, 출근 1회마다 ${dutyMult}일이 차감됩니다.`:(F.job.value?'토·일·공휴일은 제외하고 계산합니다.':'');
     F.dateHint.textContent=(F.start.value&&F.start.value<today)?'지난 날짜입니다. 사후 신청으로 접수됩니다.':'';
@@ -129,7 +128,7 @@ function buildForm(){
     h('div',{class:'fld'},h('span',null,'휴가 종류 ',h('b',null,'*')),typeC),F.typeHint,
     h('div',{class:'fld'},h('span',{id:'perLbl'},'기간 선택 ',h('b',null,'*')),CAL),
     h('div',{class:'grid2'},L.fld('시작일',F.start),L.fld('종료일',F.end)),F.dateHint,
-    F.days,F.dayHint,F.reasonBox,L.fld('담당자 전달사항 (선택)',F.notes));
+    F.days,F.dayHint,F.reasonBox);
   const card1=h('div',{class:'card'},h('h2',null,'1. 근무자 정보'),
     h('div',{class:'fld'},h('span',null,'근무지 ',h('b',null,'*')),F.school,h('small',null,'검색한 뒤 목록에서 선택해 주세요.')),
     L.fld('성함',F.name,{req:1}),
@@ -137,8 +136,8 @@ function buildForm(){
     h('div',{class:'fld'},h('span',null,'직종 ',h('b',null,'*')),jobC));
   const card3=h('div',{class:'card'},h('h2',null,'3. 서명'),
     h('div',{class:'fld'},SIG.el,h('div',{class:'sigbar'},h('small',{style:'color:var(--mute)'},'흰 칸에 성함을 손가락으로 써 주세요.'),h('button',{type:'button',class:'btn ghost sm',onclick:()=>SIG.clear()},'다시 쓰기'))));
-  const btn=h('button',{type:'submit',class:'btn block big'},'신청 내용 확인하기');
-  const form=h('form',{novalidate:true,onsubmit:e=>{e.preventDefault();review();}},card1,sub,card3,h('div',{class:'hp'},F.hp),F.err,btn);
+  const btn=h('button',{type:'submit',class:'btn block big'},'신청하기'); F.btn=btn;
+  const form=h('form',{novalidate:true,onsubmit:e=>{e.preventDefault();submit();}},card1,sub,card3,h('div',{class:'hp'},F.hp),F.err,btn);
   if(me.school) F.school.set(me.school); if(me.name) F.name.value=me.name; if(me.phone) F.phone.value=me.phone; if(me.job) jobC.set(me.job);
   F.recalc(); return form;
 }
@@ -158,36 +157,26 @@ function collect(){
   if(F.type==='경조사휴가'&&!F.reason.value.trim()) e.push('경조사휴가는 사유를 직접 작성해 주세요.');
   if(SIG.isEmpty()) e.push('서명란에 서명해 주세요.');
   return {e,days,v:{school:F.school.get(),name:F.name.value.trim(),phone:F.phone.value.replace(/\D/g,''),job:F.job.value,type:F.type,start,end,
-    reason:F.type==='경조사휴가'?F.reason.value.trim():'개인사정',notes:F.notes.value.trim(),website:F.hp.value,sig:SIG.png()}};
+    reason:F.type==='경조사휴가'?F.reason.value.trim():'개인사정',website:F.hp.value,sig:SIG.png()}};
 }
 
-function review(){
+async function submit(){
+  if(busy) return;
   F.err.textContent='';
   const {e,days,v}=collect();
   if(e.length){ F.err.textContent=e.join('\n'); F.err.scrollIntoView({block:'center',behavior:'smooth'}); return; }
   CUR={...v,days};
-  const rows=[['근무지',v.school],['성함',v.name],['연락처',fmtPhone(v.phone)],['직종',v.job],['휴가 종류',v.type],['휴가 기간',v.job==='당직경비'?`${L.fullD(v.start)} 오후 출근 ~ ${L.fullD(addDays(shiftDates(v.start,v.end).slice(-1)[0],1))} 오전 퇴근`:L.fullRange(v.start,v.end)],['신청 일수',num(days)+'일'+(v.job==='당직경비'&&!TYPE[v.type].half?` (출근 ${num(days/dutyMult)}회 × ${dutyMult}일)`:'')],['사유',v.reason],['전달사항',v.notes||'없음']];
-  const chk=h('input',{type:'checkbox',id:'okchk'}), err=h('p',{class:'err',role:'alert'});
-  const go=h('button',{class:'btn block big',onclick:async()=>{
-    err.textContent=''; if(!chk.checked){ err.textContent='내용을 확인한 뒤 확인란을 눌러 주세요.'; return; }
-    if(busy) return; busy=true; go.disabled=true; go.textContent='제출 중…';
-    try{ const r=await L.api('/api/apply',{body:CUR}); store.set({school:v.school,name:v.name,phone:fmtPhone(v.phone),job:v.job}); done(r); }
-    catch(x){ err.textContent=x.message; }
-    busy=false; go.disabled=false; go.textContent='제출하기';
-  }},'제출하기');
-  $('#main').replaceChildren(h('div',{class:'card'},h('h2',null,'내용이 맞는지 확인해 주세요'),
-    h('dl',{class:'sum'},rows.flatMap(([k,x])=>[h('dt',null,k),h('dd',null,x)])),
-    h('div',{class:'sigprev'},h('span',null,'신청인 서명'),h('img',{src:v.sig,alt:'서명'})),
-    h('label',{class:'chk big'},chk,'위 내용을 확인했으며, 본인이 직접 신청합니다.'),err,go,
-    h('button',{class:'btn ghost block big',style:'margin-top:10px',onclick:back},'내용 수정하기')));
-  window.scrollTo(0,0);
+  busy=true; F.btn.disabled=true; F.btn.textContent='신청 중…';
+  try{ const r=await L.api('/api/apply',{body:CUR}); store.set({school:v.school,name:v.name,phone:fmtPhone(v.phone),job:v.job}); done(r); }
+  catch(x){ F.err.textContent=x.message; F.err.scrollIntoView({block:'center',behavior:'smooth'}); }
+  busy=false; F.btn.disabled=false; F.btn.textContent='신청하기';
 }
 function back(){ $('#main').replaceChildren(FORM); window.scrollTo(0,0); }
 function done(r){
   $('#main').replaceChildren(h('div',{class:'card center'},h('div',{class:'tick'},'✓'),h('h2',null,'신청이 접수되었습니다'),
     h('div',{class:'receipt'},h('div',{class:'sub'},`${CUR.school} · ${CUR.name} · ${CUR.type} ${num(r.days)}일`),h('div',{class:'sub'},L.range(CUR.start,CUR.end))),
     h('p',{class:'hint'},'관리자가 확인한 뒤 승인합니다. 승인 여부는 담당자에게 문의해 주세요.'),
-    h('button',{class:'btn ghost block big',onclick:()=>{ SIG.clear(); F.start.value=''; F.end.value=''; F.notes.value=''; F.reason.value=''; CAL.resetPick(); F.recalc(); back(); }},'새 신청서 작성하기')));
+    h('button',{class:'btn ghost block big',onclick:()=>{ SIG.clear(); F.start.value=''; F.end.value=''; F.reason.value=''; CAL.resetPick(); F.recalc(); back(); }},'새 신청서 작성하기')));
   window.scrollTo(0,0);
 }
 
